@@ -1,0 +1,56 @@
+import os
+import numpy as np
+import pydicom
+import nibabel as nib
+
+def load_dicom_series(directory):
+    dicom_files = [pydicom.dcmread(os.path.join(directory, f)) for f in os.listdir(directory) if f.endswith('.dcm')]
+    dicom_files.sort(key=lambda x: int(x.InstanceNumber))
+    dicom_array = np.stack([ds.pixel_array for ds in dicom_files])
+    return dicom_files, dicom_array
+
+def save_modified_dicom_series(dicom_files, modified_array, output_directory):
+    os.makedirs(output_directory, exist_ok=True)
+    for i, ds in enumerate(dicom_files):
+        ds.PixelData = modified_array[i].tobytes()
+        ds.Rows, ds.Columns = modified_array[i].shape
+        ds.save_as(os.path.join(output_directory, f"modified_{i}.dcm"))
+
+def update_dicom_orientation(directory, new_row_cosines, new_col_cosines):
+    dicom_files = [f for f in os.listdir(directory) if f.endswith('.dcm')]
+    for file_name in dicom_files:
+        file_path = os.path.join(directory, file_name)
+        dcm = pydicom.dcmread(file_path)
+        dcm.ImageOrientationPatient = new_row_cosines + new_col_cosines
+        dcm.save_as(file_path)
+        print(f"Updated orientation for {file_name}")
+
+def main(dicom_directory, nifti_file, output_directory):
+    # Load DICOM series
+    dicom_files, dicom_array = load_dicom_series(dicom_directory)
+
+    # Load NIfTI file
+    nii = nib.load(nifti_file)
+    nifti_array = nii.get_fdata()
+
+    # Transpose and flip the NIfTI array to match DICOM dimensions
+    nifti_array = np.flip(np.transpose(nifti_array, (2, 0, 1)), axis=0)
+
+    if dicom_array.shape != nifti_array.shape:
+        raise ValueError("DICOM and NIfTI arrays do not have the same dimensions after transposition and flipping.")
+
+    # Replace DICOM array with NIfTI array and save modified DICOM series
+    save_modified_dicom_series(dicom_files, nifti_array.astype(dicom_files[0].pixel_array.dtype), output_directory)
+
+    # Update DICOM orientation metadata
+    new_row_cosines = [0, 1, 0]  # Anterior to Posterior
+    new_col_cosines = [1, 0, 0]  # Left to Right
+    update_dicom_orientation(output_directory, new_row_cosines, new_col_cosines)
+
+# Set up paths
+dicom_directory = r'C:\Users\lidio\Documents\MATLAB\ying hwei code\Testbrain'
+nifti_file = r'C:\Users\lidio\Documents\MATLAB\ying hwei code\Testbrain\BRAIN007_Brain30sec_RegressTree_3x3.nii'
+output_directory = r'C:\Users\lidio\Documents\MATLAB\ying hwei code\Testbrain\output'
+
+# Execute the workflow
+main(dicom_directory, nifti_file, output_directory)
